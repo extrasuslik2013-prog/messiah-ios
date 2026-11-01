@@ -28,14 +28,29 @@ final class LiveSession: ObservableObject {
                 return
             }
             guard let self else { return }
+            SoundManager.shared.liveOpen()
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            var failures = 0
             while !Task.isCancelled {
                 self.phase = .listening
+                SoundManager.shared.micOn()
+                try? await Task.sleep(nanoseconds: 250_000_000)   // let the cue finish before the mic opens
                 guard let text = await self.recognizer.listenOnce() else {
                     if Task.isCancelled { break }
-                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    failures += 1
+                    if failures >= 5 {
+                        self.problem = "Messiah couldn't hear anything. Check the microphone and try again."
+                        self.phase = .idle
+                        AudioSessionMode.playback()
+                        self.loop = nil
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: 400_000_000)
                     continue
                 }
+                failures = 0
                 if Task.isCancelled { break }
+                SoundManager.shared.micOff()
 
                 self.phase = .thinking
                 await self.vm.sendAndWait(text, speak: true)
@@ -51,6 +66,7 @@ final class LiveSession: ObservableObject {
     }
 
     func stop() {
+        if phase != .idle { SoundManager.shared.liveClose() }
         loop?.cancel()
         loop = nil
         recognizer.cancel()
@@ -64,8 +80,8 @@ final class LiveSession: ObservableObject {
     func interrupt() {
         switch phase {
         case .listening: recognizer.finish(recognizer.transcript)
-        case .speaking: vm.speech.stop()
-        case .thinking: vm.stop()
+        case .speaking: SoundManager.shared.interrupt(); vm.speech.stop()
+        case .thinking: SoundManager.shared.interrupt(); vm.stop()
         case .idle: break
         }
     }

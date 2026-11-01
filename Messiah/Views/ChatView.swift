@@ -10,6 +10,7 @@ struct ChatView: View {
     @State private var showLive = false
     @State private var micDenied = false
     @State private var dictationBase = ""
+    @State private var dictationError: String?
 
     init(vm: ChatViewModel, store: ChatHistoryStore) {
         self._vm = ObservedObject(wrappedValue: vm)
@@ -42,6 +43,13 @@ struct ChatView: View {
         .fullScreenCover(isPresented: $showLive) {
             LiveChatView(session: live, store: store) { showLive = false }
         }
+        .alert("Voice input unavailable", isPresented: Binding(
+            get: { dictationError != nil }, set: { if !$0 { dictationError = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(dictationError ?? "")
+        }
         .alert("Microphone access needed", isPresented: $micDenied) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -54,6 +62,7 @@ struct ChatView: View {
             dictation.finish(dictation.transcript)
             return
         }
+        guard !vm.isSending else { return }
         Task {
             guard await SpeechRecognizer.requestPermission() else { micDenied = true; return }
             let base = vm.input.isEmpty ? "" : vm.input + " "
@@ -62,9 +71,17 @@ struct ChatView: View {
             dictation.silenceTimeout = 2.5
             dictation.onFinish = { text in
                 if let text { model.input = base + text }
+                SoundManager.shared.micOff()
                 AudioSessionMode.playback()
             }
-            do { try dictation.start() } catch { AudioSessionMode.playback() }
+            SoundManager.shared.micOn()
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            do {
+                try dictation.start()
+            } catch {
+                AudioSessionMode.playback()
+                dictationError = error.localizedDescription
+            }
         }
     }
 

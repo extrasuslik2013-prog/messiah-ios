@@ -17,19 +17,45 @@ final class SpeechRecognizer: ObservableObject {
     var onFinish: ((String?) -> Void)?
 
     private let recognizer = SFSpeechRecognizer(locale: Locale.current) ?? SFSpeechRecognizer()
-    private let engine = AVAudioEngine()
+    private var engine: AVAudioEngine?
+    private var tapInstalled = false
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var silenceTimer: Task<Void, Never>?
     private var continuation: CheckedContinuation<String?, Never>?
 
-    static func requestPermission() async -> Bool {
-        let speechOK = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
-            SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0 == .authorized) }
+    /// Asks for Speech Recognition + Microphone access.
+    /// Nonisolated on purpose: iOS calls these callbacks on a background
+    /// queue, and a main-actor closure there crashes the app.
+    nonisolated static func requestPermission() async -> Bool {
+        let speechOK: Bool
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized: speechOK = true
+        case .notDetermined: speechOK = await requestSpeechAuth()
+        default: speechOK = false
         }
         guard speechOK else { return false }
-        return await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
-            AVAudioApplication.requestRecordPermission { c.resume(returning: $0) }
+
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted: return true
+        case .undetermined: return await requestMicAuth()
+        default: return false
+        }
+    }
+
+    nonisolated private static func requestSpeechAuth() async -> Bool {
+        await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+            SFSpeechRecognizer.requestAuthorization { status in
+                c.resume(returning: status == .authorized)
+            }
+        }
+    }
+
+    nonisolated private static func requestMicAuth() async -> Bool {
+        await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+            AVAudioApplication.requestRecordPermission { granted in
+                c.resume(returning: granted)
+            }
         }
     }
 
@@ -47,19 +73,34 @@ final class SpeechRecognizer: ObservableObject {
         guard let recognizer, recognizer.isAvailable else {
             throw ProviderError(message: "Speech recognition isn't available right now.")
         }
-        AudioSessionMode.record()
+
+        // 1) switch the session to mic + speaker BEFORE touching the input node
+        try AudioSessionMode.record()
+
+        // 2) fresh engine every time, so the input node picks up the new route
+        let engine = AVAudioEngine()
+        let input = engine.inputNode
+        let format = input.inputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw ProviderError(message: "The microphone isn't available.")
+        }
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
         req.addsPunctuation = true
-        request = req
 
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.makeTap(req, owner: self))
+        tapInstalled = true
+        self.engine = engine
+        self.request = req
+
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            stopEngine()
+            throw error
+        }
         isListening = true
         task = recognizer.recognitionTask(with: req, resultHandler: Self.makeHandler(owner: self))
     }
@@ -102,8 +143,12 @@ final class SpeechRecognizer: ObservableObject {
     private func stopEngine() {
         silenceTimer?.cancel()
         silenceTimer = nil
-        if engine.isRunning { engine.stop() }
-        engine.inputNode.removeTap(onBus: 0)
+        if let engine {
+            if engine.isRunning { engine.stop() }
+            if tapInstalled { engine.inputNode.removeTap(onBus: 0) }
+        }
+        tapInstalled = false
+        engine = nil
         request?.endAudio()
         request = nil
         task?.cancel()

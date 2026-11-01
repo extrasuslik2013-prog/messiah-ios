@@ -7,22 +7,24 @@ enum AudioSessionMode {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
     }
 
-    static func record() {
+    static func record() throws {
         let s = AVAudioSession.sharedInstance()
-        try? s.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP, .duckOthers])
-        try? s.setActive(true, options: .notifyOthersOnDeactivation)
+        try s.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP, .duckOthers])
+        try s.setActive(true)
     }
 }
 
-/// The three bundled cues: processing loop, success ping, error ping.
+/// Bundled cues: processing loop, success / error pings, and the
+/// voice cues (mic on/off, live chat open/close, interrupt).
 @MainActor
 final class SoundManager {
     static let shared = SoundManager()
     private var loop: AVAudioPlayer?
-    private var cue: AVAudioPlayer?
+    private var cues: [AVAudioPlayer] = []
 
     private func make(_ name: String) -> AVAudioPlayer? {
-        guard let url = Bundle.main.url(forResource: name, withExtension: "mp3") else { return nil }
+        guard let url = Bundle.main.url(forResource: name, withExtension: "mp3")
+                ?? Bundle.main.url(forResource: name, withExtension: "wav") else { return nil }
         return try? AVAudioPlayer(contentsOf: url)
     }
 
@@ -44,11 +46,19 @@ final class SoundManager {
 
     func playSuccess() { play("success_ping_merged") }
     func playError() { play("waves_error_ping2") }
+    func micOn() { play("messiah_mic_on", volume: 0.8) }
+    func micOff() { play("messiah_mic_off", volume: 0.8) }
+    func liveOpen() { play("messiah_wake", volume: 0.8) }
+    func liveClose() { play("messiah_window_close", volume: 0.8) }
+    func interrupt() { play("messiah_interrupt", volume: 0.8) }
 
-    private func play(_ name: String) {
+    private func play(_ name: String, volume: Float = 1) {
         try? AVAudioSession.sharedInstance().setActive(true)
-        cue = make(name)
-        cue?.play()
+        cues.removeAll { !$0.isPlaying }
+        guard let p = make(name) else { return }
+        p.volume = volume
+        p.play()
+        cues.append(p)
     }
 }
 
