@@ -50,10 +50,7 @@ enum AppSettings {
     static var systemPrompt: String {
         let p = personality
         guard !p.isEmpty else { return baseSystemPrompt }
-        return baseSystemPrompt + "
-
-Personality (stay in this character in every reply):
-" + p
+        return baseSystemPrompt + "\n\nPersonality (stay in this character in every reply):\n" + p
     }
 }
 
