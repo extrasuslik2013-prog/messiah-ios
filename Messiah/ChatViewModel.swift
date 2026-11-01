@@ -65,8 +65,9 @@ final class ChatViewModel: ObservableObject {
         let request = UUID()
         requestID = request
         let shouldSpeak = speak ?? AppSettings.speechEnabled
-        let newTask = Task { [weak self] in
-            await self?.run(provider: provider, history: history, replyID: reply.id, convID: convID, speak: shouldSpeak)
+        let newTask = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            await self.run(provider: provider, history: history, replyID: reply.id, convID: convID, speak: shouldSpeak)
         }
         task = newTask
         Task { [weak self] in

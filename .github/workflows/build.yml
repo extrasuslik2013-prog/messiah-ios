@@ -18,6 +18,7 @@ jobs:
 
       - name: Build (unsigned)
         run: |
+          set -o pipefail
           xcodebuild -project Messiah.xcodeproj -scheme Messiah \
             -configuration Release -sdk iphoneos \
             -destination 'generic/platform=iOS' \
