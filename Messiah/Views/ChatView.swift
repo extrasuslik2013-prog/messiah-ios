@@ -1,0 +1,126 @@
+import SwiftUI
+
+struct ChatView: View {
+    @ObservedObject var vm: ChatViewModel
+    @ObservedObject var store: ChatHistoryStore
+    @ObservedObject private var speech: SpeechService
+    @FocusState private var focused: Bool
+
+    init(vm: ChatViewModel, store: ChatHistoryStore) {
+        self._vm = ObservedObject(wrappedValue: vm)
+        self._store = ObservedObject(wrappedValue: store)
+        self._speech = ObservedObject(wrappedValue: vm.speech)
+    }
+
+    private var messages: [ChatMessage] { store.currentMessages }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                if messages.isEmpty {
+                    GeminiBackgroundGlow().opacity(0.55)
+                    Text("Ask Messiah anything.")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                } else {
+                    messageList
+                }
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture { focused = false }
+
+            inputBar
+        }
+    }
+
+    private var messageList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    ForEach(messages) { m in
+                        MessageRow(message: m, status: m.id == messages.last?.id ? vm.status : nil)
+                            .id(m.id)
+                    }
+                    Color.clear.frame(height: 1).id("bottom")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+            .onChange(of: store.selectedID) { _, _ in
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
+            .onChange(of: messages.last?.content) { _, _ in
+                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+        }
+    }
+
+    private var inputBar: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField("Message Messiah", text: $vm.input, axis: .vertical)
+                .lineLimit(1...6)
+                .focused($focused)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+
+            Button {
+                if vm.isSending || speech.isSpeaking { vm.stop() } else { vm.send() }
+            } label: {
+                Image(systemName: (vm.isSending || speech.isSpeaking) ? "stop.fill" : "arrow.up")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Color(.systemBackground))
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(sendEnabled ? Color.primary : Color.secondary.opacity(0.4)))
+            }
+            .disabled(!sendEnabled)
+            .padding(.trailing, 6)
+            .padding(.bottom, 5)
+        }
+        .background(RoundedRectangle(cornerRadius: 24).fill(Color(.secondarySystemBackground)))
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+        .padding(.top, 4)
+    }
+
+    private var sendEnabled: Bool {
+        vm.isSending || speech.isSpeaking || !vm.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+struct MessageRow: View {
+    let message: ChatMessage
+    let status: String?
+
+    var body: some View {
+        if message.role == .user {
+            HStack {
+                Spacer(minLength: 50)
+                Text(message.content)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 20).fill(Color(.secondarySystemBackground)))
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                if !message.content.isEmpty {
+                    Text(Self.markdown(message.content))
+                        .textSelection(.enabled)
+                        .foregroundStyle(message.isError ? Color.red : Color.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let status {
+                    GeminiShimmerText(text: status)
+                }
+            }
+        }
+    }
+
+    static func markdown(_ s: String) -> AttributedString {
+        (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(s)
+    }
+}
