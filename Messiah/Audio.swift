@@ -1,6 +1,19 @@
 import Foundation
 import AVFoundation
 
+/// Switches the audio session between plain playback and mic + speaker.
+enum AudioSessionMode {
+    static func playback() {
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+    }
+
+    static func record() {
+        let s = AVAudioSession.sharedInstance()
+        try? s.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP, .duckOthers])
+        try? s.setActive(true, options: .notifyOthersOnDeactivation)
+    }
+}
+
 /// The three bundled cues: processing loop, success ping, error ping.
 @MainActor
 final class SoundManager {

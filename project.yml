@@ -44,3 +44,5 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Messiah connects to your Ollama server on the local network.
+        NSMicrophoneUsageDescription: Messiah listens to your voice for dictation and live chat.
+        NSSpeechRecognitionUsageDescription: Messiah turns your speech into text using Apple speech recognition.

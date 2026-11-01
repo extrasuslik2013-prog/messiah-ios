@@ -5,11 +5,18 @@ struct ChatView: View {
     @ObservedObject var store: ChatHistoryStore
     @ObservedObject private var speech: SpeechService
     @FocusState private var focused: Bool
+    @StateObject private var dictation: SpeechRecognizer
+    @StateObject private var live: LiveSession
+    @State private var showLive = false
+    @State private var micDenied = false
+    @State private var dictationBase = ""
 
     init(vm: ChatViewModel, store: ChatHistoryStore) {
         self._vm = ObservedObject(wrappedValue: vm)
         self._store = ObservedObject(wrappedValue: store)
         self._speech = ObservedObject(wrappedValue: vm.speech)
+        self._dictation = StateObject(wrappedValue: SpeechRecognizer())
+        self._live = StateObject(wrappedValue: LiveSession(vm: vm))
     }
 
     private var messages: [ChatMessage] { store.currentMessages }
@@ -32,6 +39,40 @@ struct ChatView: View {
 
             inputBar
         }
+        .fullScreenCover(isPresented: $showLive) {
+            LiveChatView(session: live, store: store) { showLive = false }
+        }
+        .alert("Microphone access needed", isPresented: $micDenied) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Allow Microphone and Speech Recognition for Messiah in the iPhone Settings app.")
+        }
+    }
+
+    private func toggleDictation() {
+        if dictation.isListening {
+            dictation.finish(dictation.transcript)
+            return
+        }
+        Task {
+            guard await SpeechRecognizer.requestPermission() else { micDenied = true; return }
+            let base = vm.input.isEmpty ? "" : vm.input + " "
+            dictationBase = base
+            let model = vm
+            dictation.silenceTimeout = 2.5
+            dictation.onFinish = { text in
+                if let text { model.input = base + text }
+                AudioSessionMode.playback()
+            }
+            do { try dictation.start() } catch { AudioSessionMode.playback() }
+        }
+    }
+
+    private func openLive() {
+        focused = false
+        if dictation.isListening { dictation.cancel() }
+        vm.stop()
+        showLive = true
     }
 
     private var messageList: some View {
@@ -60,33 +101,81 @@ struct ChatView: View {
 
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message Messiah", text: $vm.input, axis: .vertical)
+            TextField(dictation.isListening ? "Listening…" : "Message Messiah", text: $vm.input, axis: .vertical)
                 .lineLimit(1...6)
                 .focused($focused)
-                .padding(.horizontal, 16)
+                .padding(.leading, 16)
                 .padding(.vertical, 11)
+                .onChange(of: dictation.transcript) { _, t in
+                    if dictation.isListening, !t.isEmpty { vm.input = dictationBase + t }
+                }
 
-            Button {
-                if vm.isSending || speech.isSpeaking { vm.stop() } else { vm.send() }
-            } label: {
-                Image(systemName: (vm.isSending || speech.isSpeaking) ? "stop.fill" : "arrow.up")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color(.systemBackground))
+            Button(action: toggleDictation) {
+                Image(systemName: dictation.isListening ? "mic.fill" : "mic")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(dictation.isListening ? AnyShapeStyle(Palette.magenta) : AnyShapeStyle(.secondary))
                     .frame(width: 34, height: 34)
-                    .background(Circle().fill(sendEnabled ? Color.primary : Color.secondary.opacity(0.4)))
+                    .scaleEffect(1 + dictation.level * 0.35)
+                    .animation(.easeOut(duration: 0.1), value: dictation.level)
             }
-            .disabled(!sendEnabled)
-            .padding(.trailing, 6)
+            .accessibilityLabel(dictation.isListening ? "Stop dictation" : "Dictate")
             .padding(.bottom, 5)
+            .disabled(vm.isSending)
+
+            actionButton
+                .padding(.trailing, 6)
+                .padding(.bottom, 5)
         }
         .background(RoundedRectangle(cornerRadius: 24).fill(Color(.secondarySystemBackground)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24)
+                .strokeBorder(LinearGradient(colors: [Palette.magenta, Palette.coral, Palette.amber],
+                                             startPoint: .leading, endPoint: .trailing),
+                              lineWidth: dictation.isListening ? 1.5 : 0)
+        )
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
         .padding(.top, 4)
     }
 
-    private var sendEnabled: Bool {
-        vm.isSending || speech.isSpeaking || !vm.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var hasText: Bool {
+        !vm.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @ViewBuilder
+    private var actionButton: some View {
+        if vm.isSending || speech.isSpeaking {
+            Button { vm.stop() } label: {
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color(.systemBackground))
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(Color.primary))
+            }
+            .accessibilityLabel("Stop")
+        } else if hasText {
+            Button {
+                if dictation.isListening { dictation.cancel() }
+                vm.send()
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(LinearGradient(colors: [Palette.magenta, Palette.coral],
+                                                             startPoint: .topLeading, endPoint: .bottomTrailing)))
+            }
+            .accessibilityLabel("Send")
+        } else {
+            Button(action: openLive) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(AngularGradient(colors: Palette.orb, center: .center)))
+            }
+            .accessibilityLabel("Live chat")
+        }
     }
 }
 

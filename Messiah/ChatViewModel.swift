@@ -22,9 +22,22 @@ final class ChatViewModel: ObservableObject {
 
     func send() {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending, let convID = store.selectedID else { return }
-        speech.stop()
+        guard !text.isEmpty, !isSending else { return }
         input = ""
+        startSend(text, speak: nil)
+    }
+
+    /// Used by live chat: sends and waits until the answer is done
+    /// (speech, if any, has started by the time this returns).
+    func sendAndWait(_ text: String, speak: Bool) async {
+        if let t = startSend(text, speak: speak) { await t.value }
+    }
+
+    @discardableResult
+    private func startSend(_ raw: String, speak: Bool?) -> Task<Void, Never>? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSending, let convID = store.selectedID else { return nil }
+        speech.stop()
         store.append(ChatMessage(role: .user, content: text), to: convID)
 
         let provider: ChatProvider
@@ -33,7 +46,7 @@ final class ChatViewModel: ObservableObject {
         } catch {
             store.append(ChatMessage(role: .assistant, content: error.localizedDescription, isError: true), to: convID)
             SoundManager.shared.playError()
-            return
+            return nil
         }
 
         var history: [[String: String]] = [["role": "system", "content": AppSettings.systemPrompt]]
@@ -51,9 +64,11 @@ final class ChatViewModel: ObservableObject {
 
         let request = UUID()
         requestID = request
-        task = Task { [weak self] in
-            await self?.run(provider: provider, history: history, replyID: reply.id, convID: convID)
+        let shouldSpeak = speak ?? AppSettings.speechEnabled
+        let newTask = Task { [weak self] in
+            await self?.run(provider: provider, history: history, replyID: reply.id, convID: convID, speak: shouldSpeak)
         }
+        task = newTask
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 45_000_000_000)
             guard let self, self.requestID == request, self.isSending,
@@ -61,6 +76,7 @@ final class ChatViewModel: ObservableObject {
             self.timedOut = true
             self.task?.cancel()
         }
+        return newTask
     }
 
     func stop() {
@@ -68,7 +84,7 @@ final class ChatViewModel: ObservableObject {
         speech.stop()
     }
 
-    private func run(provider: ChatProvider, history: [[String: String]], replyID: UUID, convID: UUID) async {
+    private func run(provider: ChatProvider, history: [[String: String]], replyID: UUID, convID: UUID, speak: Bool) async {
         var text = ""
         var lastFlush = Date()
         do {
@@ -101,7 +117,7 @@ final class ChatViewModel: ObservableObject {
         }
         store.setContent(text, message: replyID, in: convID, persist: true)
 
-        guard AppSettings.speechEnabled else {
+        guard speak else {
             SoundManager.shared.stopLoop()
             SoundManager.shared.playSuccess()
             finish()
