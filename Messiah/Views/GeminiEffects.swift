@@ -15,7 +15,7 @@ struct GeminiBackgroundGlow: View {
 
     var body: some View {
         GeometryReader { geo in
-            TimelineView(.animation) { tl in
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
                 let t = tl.date.timeIntervalSinceReferenceDate
                 ZStack {
                     ForEach(0..<blobs.count, id: \.self) { i in
@@ -27,7 +27,7 @@ struct GeminiBackgroundGlow: View {
                             .position(x: geo.size.width * (b.x + 0.12 * sin(t * b.speed + b.phase)),
                                       y: geo.size.height * (b.y + 0.08 * cos(t * b.speed * 1.3 + b.phase)))
                             .scaleEffect(1 + 0.08 * sin(t * b.speed * 2 + b.phase))
-                            .blur(radius: 70)
+                            .blur(radius: 60)
                             .opacity(0.35)
                     }
                 }

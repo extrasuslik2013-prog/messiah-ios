@@ -1,111 +1,73 @@
 import SwiftUI
 
-/// Full-screen voice mode with a moving gradient and a glowing orb that
-/// reacts to your voice.
+/// Full-screen voice mode: just the moving gradient background, status and
+/// subtitles. Tap anywhere to send / interrupt / cancel.
 struct LiveChatView: View {
     @ObservedObject var session: LiveSession
-    @ObservedObject var recognizer: SpeechRecognizer
     @ObservedObject var vm: ChatViewModel
     @ObservedObject var store: ChatHistoryStore
     let close: () -> Void
 
     init(session: LiveSession, store: ChatHistoryStore, close: @escaping () -> Void) {
         self._session = ObservedObject(wrappedValue: session)
-        self._recognizer = ObservedObject(wrappedValue: session.recognizer)
         self._vm = ObservedObject(wrappedValue: session.vm)
         self._store = ObservedObject(wrappedValue: store)
         self.close = close
     }
 
-    private var energy: Double {
-        switch session.phase {
-        case .listening: return Double(recognizer.level)
-        case .speaking: return 0.7
-        case .thinking: return 0.35
-        case .idle: return 0.1
-        }
-    }
-
-    private var statusText: String {
-        if let p = session.problem { return p }
-        switch session.phase {
-        case .listening: return recognizer.transcript.isEmpty ? "Listening" : "Listening…"
-        case .thinking: return vm.status ?? "Thinking"
-        case .speaking: return "Speaking"
-        case .idle: return "Starting"
-        }
-    }
-
-    private var caption: String {
-        switch session.phase {
-        case .listening:
-            return recognizer.transcript.isEmpty ? "Go ahead, I'm listening." : recognizer.transcript
-        case .thinking, .speaking:
-            if let last = store.currentMessages.last, last.role == .assistant {
-                return SpeechService.clean(last.content)
-            }
-            return ""
-        case .idle:
-            return ""
-        }
-    }
-
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            LiveGradientBackground(energy: energy)
-                .animation(.easeOut(duration: 0.25), value: energy)
+            // isolated in its own view so mic updates don't redraw the text
+            LiveBackground(recognizer: session.recognizer, phase: session.phase)
 
-            VStack(spacing: 28) {
-                Spacer()
-
-                LiveOrb(energy: energy, phase: session.phase)
-                    .frame(width: 210, height: 210)
-                    .contentShape(Circle())
-                    .onTapGesture { session.interrupt() }
-
-                VStack(spacing: 14) {
-                    GeminiShimmerText(text: statusText)
-                        .multilineTextAlignment(.center)
-                    Text(caption)
-                        .font(.title3.weight(.medium))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(5)
-                        .truncationMode(.head)
-                        .padding(.horizontal, 28)
-                        .animation(.easeOut(duration: 0.2), value: caption)
-                }
-                .frame(minHeight: 160, alignment: .top)
-
-                Spacer()
-
-                HStack {
-                    circleButton("xmark", label: "End live chat") {
-                        session.stop()
-                        close()
-                    }
-                    Spacer()
-                    Text(hint)
+            VStack(spacing: 0) {
+                if let notice = vm.notice {
+                    Text(notice)
                         .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.6))
-                    Spacer()
-                    circleButton(actionIcon, label: "Interrupt") { session.interrupt() }
-                        .opacity(session.phase == .idle ? 0.3 : 1)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.top, 12)
+                        .padding(.horizontal, 20)
+                        .transition(.opacity)
                 }
-                .padding(.horizontal, 28)
-                .padding(.bottom, 20)
+                Spacer()
+                LiveCaption(session: session, recognizer: session.recognizer, vm: vm, store: store)
+                Spacer()
+                controls
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture { session.interrupt() }
         .preferredColorScheme(.dark)
         .statusBarHidden()
         .onAppear { session.start() }
         .onDisappear { session.stop() }
     }
 
+    private var controls: some View {
+        HStack {
+            circleButton("xmark", label: "End live chat") {
+                session.stop()
+                close()
+            }
+            Spacer()
+            Text(hint)
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.65))
+            Spacer()
+            circleButton(actionIcon, label: "Interrupt") { session.interrupt() }
+                .opacity(session.phase == .idle ? 0.3 : 1)
+        }
+        .padding(.horizontal, 28)
+        .padding(.bottom, 20)
+    }
+
     private var hint: String {
         switch session.phase {
-        case .listening: return "Tap the orb to send"
+        case .listening: return "Tap anywhere to send"
         case .speaking: return "Tap to interrupt"
         case .thinking: return "Tap to cancel"
         case .idle: return ""
@@ -126,56 +88,78 @@ struct LiveChatView: View {
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 60, height: 60)
-                .background(.ultraThinMaterial, in: Circle())
+                .background(Circle().fill(.white.opacity(0.14)))
         }
         .accessibilityLabel(label)
     }
 }
 
-// MARK: - Orb
-
-struct LiveOrb: View {
-    var energy: Double
-    var phase: LiveSession.Phase
+/// Status line + subtitles.
+private struct LiveCaption: View {
+    @ObservedObject var session: LiveSession
+    @ObservedObject var recognizer: SpeechRecognizer
+    @ObservedObject var vm: ChatViewModel
+    @ObservedObject var store: ChatHistoryStore
 
     var body: some View {
-        TimelineView(.animation) { tl in
-            let t = tl.date.timeIntervalSinceReferenceDate
-            let pulse = orbPulse(t)
-            ZStack {
-                Circle()
-                    .fill(AngularGradient(colors: Palette.orb, center: .center, angle: .degrees(t * 35)))
-                    .blur(radius: 40)
-                    .opacity(0.9)
-                    .scaleEffect(1.3 + pulse * 1.4)
+        VStack(spacing: 16) {
+            Text(status)
+                .font(.headline)
+                .foregroundStyle(.white.opacity(0.75))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 28)
+            Text(caption)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .lineLimit(6)
+                .truncationMode(.head)
+                .padding(.horizontal, 28)
+        }
+        .frame(maxWidth: .infinity, minHeight: 220)
+    }
 
-                Circle()
-                    .fill(AngularGradient(colors: Palette.orb, center: .center, angle: .degrees(-t * 55)))
-                    .overlay(
-                        Circle().fill(RadialGradient(colors: [.white.opacity(0.55), .clear],
-                                                     center: UnitPoint(x: 0.35, y: 0.3),
-                                                     startRadius: 2, endRadius: 120))
-                    )
-                    .overlay(
-                        Circle().fill(AngularGradient(colors: Palette.orb.reversed(), center: .center,
-                                                      angle: .degrees(t * 80)))
-                            .blendMode(.screen)
-                            .opacity(0.45)
-                            .blur(radius: 12)
-                    )
-                    .clipShape(Circle())
-                    .scaleEffect(1 + pulse)
-            }
+    private var status: String {
+        if let p = session.problem { return p }
+        switch session.phase {
+        case .listening: return "Listening"
+        case .thinking: return vm.status ?? "Thinking"
+        case .speaking: return "Speaking"
+        case .idle: return "Starting"
         }
     }
 
-    private func orbPulse(_ t: Double) -> CGFloat {
-        switch phase {
-        case .listening: return CGFloat(energy) * 0.28 + 0.02 * CGFloat(sin(t * 2))
-        case .speaking: return 0.07 + 0.06 * CGFloat(sin(t * 7)) * CGFloat(abs(sin(t * 1.7)))
-        case .thinking: return 0.04 * CGFloat(sin(t * 3))
-        case .idle: return 0
+    private var caption: String {
+        switch session.phase {
+        case .listening:
+            return recognizer.transcript.isEmpty ? "Go ahead, I'm listening." : recognizer.transcript
+        case .thinking, .speaking:
+            if let last = store.currentMessages.last, last.role == .assistant {
+                return SpeechService.clean(last.content)
+            }
+            return ""
+        case .idle:
+            return ""
         }
+    }
+}
+
+/// The animated gradient. Reacts to your voice while listening.
+private struct LiveBackground: View {
+    @ObservedObject var recognizer: SpeechRecognizer
+    let phase: LiveSession.Phase
+
+    private var energy: Double {
+        switch phase {
+        case .listening: return Double(recognizer.level)
+        case .speaking: return 0.6
+        case .thinking: return 0.3
+        case .idle: return 0.1
+        }
+    }
+
+    var body: some View {
+        LiveGradientBackground(energy: energy)
     }
 }
 
@@ -199,10 +183,10 @@ struct LiveGradientBackground: View {
             if #available(iOS 18.0, *) {
                 AnimatedMesh(energy: energy)
             } else {
-                GeminiBackgroundGlow().opacity(1)
+                GeminiBackgroundGlow()
             }
             // keep text readable
-            LinearGradient(colors: [.black.opacity(0.35), .clear, .black.opacity(0.55)],
+            LinearGradient(colors: [.black.opacity(0.3), .black.opacity(0.15), .black.opacity(0.55)],
                            startPoint: .top, endPoint: .bottom)
         }
         .ignoresSafeArea()
@@ -215,24 +199,26 @@ struct AnimatedMesh: View {
     var energy: Double
 
     var body: some View {
-        TimelineView(.animation) { tl in
-            MeshGradient(width: 3, height: 3, points: points(Float(tl.date.timeIntervalSinceReferenceDate)),
+        // 30 fps is plenty for a slow gradient and much lighter than 120
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+            MeshGradient(width: 3, height: 3,
+                         points: points(Float(tl.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 10_000))),
                          colors: [Palette.night, Palette.violet, Palette.night,
                                   Palette.magenta, Palette.coral, Palette.blue,
                                   Palette.amber, Palette.magenta, Palette.violet])
+                .drawingGroup()
         }
     }
 
     private func points(_ t: Float) -> [SIMD2<Float>] {
         let e = Float(energy)
         let swing: Float = 0.12 + 0.18 * e
-        let speed: Float = 1 + 1.5 * e
-        let topX: Float = 0.5 + 0.25 * sin(t * 0.6 * speed)
-        let leftY: Float = 0.5 + 0.2 * cos(t * 0.5 * speed)
-        let rightY: Float = 0.5 + 0.2 * sin(t * 0.7 * speed)
-        let bottomX: Float = 0.5 + 0.25 * cos(t * 0.55 * speed)
-        let midX: Float = 0.5 + swing * sin(t * 0.9 * speed)
-        let midY: Float = 0.5 + swing * cos(t * 1.1 * speed)
+        let topX: Float = 0.5 + 0.25 * sin(t * 0.6)
+        let leftY: Float = 0.5 + 0.2 * cos(t * 0.5)
+        let rightY: Float = 0.5 + 0.2 * sin(t * 0.7)
+        let bottomX: Float = 0.5 + 0.25 * cos(t * 0.55)
+        let midX: Float = 0.5 + swing * sin(t * 0.9)
+        let midY: Float = 0.5 + swing * cos(t * 1.1)
         return [
             SIMD2<Float>(0, 0), SIMD2<Float>(topX, 0), SIMD2<Float>(1, 0),
             SIMD2<Float>(0, leftY), SIMD2<Float>(midX, midY), SIMD2<Float>(1, rightY),

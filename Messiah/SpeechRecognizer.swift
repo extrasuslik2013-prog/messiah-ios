@@ -23,6 +23,7 @@ final class SpeechRecognizer: ObservableObject {
     private var task: SFSpeechRecognitionTask?
     private var silenceTimer: Task<Void, Never>?
     private var continuation: CheckedContinuation<String?, Never>?
+    private var lastLevelUpdate = Date.distantPast
 
     /// Asks for Speech Recognition + Microphone access.
     /// Nonisolated on purpose: iOS calls these callbacks on a background
@@ -159,7 +160,13 @@ final class SpeechRecognizer: ObservableObject {
 
     private func setLevel(_ v: CGFloat) {
         guard isListening else { return }
-        level = level * 0.6 + v * 0.4   // smooth
+        // at most ~15 updates a second, and only when it visibly changes
+        let now = Date()
+        guard now.timeIntervalSince(lastLevelUpdate) > 0.066 else { return }
+        let smoothed = level * 0.5 + v * 0.5
+        guard abs(smoothed - level) > 0.02 else { return }
+        lastLevelUpdate = now
+        level = smoothed
     }
 
     // Built outside the main actor: these run on audio / recognizer threads.

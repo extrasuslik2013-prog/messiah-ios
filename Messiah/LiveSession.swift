@@ -33,8 +33,6 @@ final class LiveSession: ObservableObject {
             var failures = 0
             while !Task.isCancelled {
                 self.phase = .listening
-                SoundManager.shared.micOn()
-                try? await Task.sleep(nanoseconds: 250_000_000)   // let the cue finish before the mic opens
                 guard let text = await self.recognizer.listenOnce() else {
                     if Task.isCancelled { break }
                     failures += 1

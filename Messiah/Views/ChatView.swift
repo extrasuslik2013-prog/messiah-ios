@@ -37,6 +37,19 @@ struct ChatView: View {
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
             .onTapGesture { focused = false }
+            .overlay(alignment: .top) {
+                if let notice = vm.notice {
+                    Text(notice)
+                        .font(.footnote)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.thinMaterial, in: Capsule())
+                        .padding(.top, 6)
+                        .padding(.horizontal, 16)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: vm.notice)
 
             inputBar
         }

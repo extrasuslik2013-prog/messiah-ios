@@ -10,6 +10,7 @@ struct MessiahApp: App {
         let store = ChatHistoryStore()
         _store = StateObject(wrappedValue: store)
         _chat = StateObject(wrappedValue: ChatViewModel(store: store))
+        UserDefaults.standard.register(defaults: Sfx.defaults)
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
     }
 

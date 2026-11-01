@@ -14,8 +14,49 @@ enum AudioSessionMode {
     }
 }
 
-/// Bundled cues: processing loop, success / error pings, and the
-/// voice cues (mic on/off, live chat open/close, interrupt).
+/// Every sound effect, each with its own on/off switch in Settings.
+enum Sfx: String, CaseIterable, Identifiable {
+    case thinking, liveOpen, liveClose, mic, interrupt, error
+
+    var id: String { rawValue }
+    var key: String { "sfx_" + rawValue }
+
+    var label: String {
+        switch self {
+        case .thinking: return "Thinking loop"
+        case .liveOpen: return "Live chat opens"
+        case .liveClose: return "Live chat closes"
+        case .mic: return "Mic on / off"
+        case .interrupt: return "Interrupt / cancel"
+        case .error: return "Error"
+        }
+    }
+
+    var file: String {
+        switch self {
+        case .thinking: return "messiah_processing_loop"
+        case .liveOpen: return "messiah_wake"
+        case .liveClose: return "messiah_window_close"
+        case .mic: return "messiah_mic_on"
+        case .interrupt: return "messiah_interrupt"
+        case .error: return "waves_error_ping2"
+        }
+    }
+
+    static let masterKey = "sfx_enabled"
+
+    static var defaults: [String: Any] {
+        var d: [String: Any] = [masterKey: true]
+        for s in allCases { d[s.key] = true }
+        return d
+    }
+
+    var isOn: Bool {
+        let d = UserDefaults.standard
+        return d.bool(forKey: Sfx.masterKey) && d.bool(forKey: key)
+    }
+}
+
 @MainActor
 final class SoundManager {
     static let shared = SoundManager()
@@ -23,42 +64,52 @@ final class SoundManager {
     private var cues: [AVAudioPlayer] = []
 
     private func make(_ name: String) -> AVAudioPlayer? {
-        guard let url = Bundle.main.url(forResource: name, withExtension: "mp3")
-                ?? Bundle.main.url(forResource: name, withExtension: "wav") else { return nil }
+        guard let url = Bundle.main.url(forResource: name, withExtension: "wav")
+                ?? Bundle.main.url(forResource: name, withExtension: "mp3") else { return nil }
         return try? AVAudioPlayer(contentsOf: url)
     }
 
+    /// Thinking loop (text chat and live chat).
     func startLoop() {
-        try? AVAudioSession.sharedInstance().setActive(true)
         loop?.stop()
-        loop = make("waves_loop")
+        loop = nil
+        guard Sfx.thinking.isOn else { return }
+        try? AVAudioSession.sharedInstance().setActive(true)
+        loop = make(Sfx.thinking.file)
         loop?.numberOfLoops = -1
-        loop?.volume = 0.6
+        loop?.volume = 0.7
         loop?.play()
     }
 
     func stopLoop() {
-        loop?.setVolume(0, fadeDuration: 0.25)
-        let old = loop
+        guard let old = loop else { return }
         loop = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { old?.stop() }
+        old.setVolume(0, fadeDuration: 0.25)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { old.stop() }
     }
 
-    func playSuccess() { play("success_ping_merged") }
-    func playError() { play("waves_error_ping2") }
-    func micOn() { play("messiah_mic_on", volume: 0.8) }
-    func micOff() { play("messiah_mic_off", volume: 0.8) }
-    func liveOpen() { play("messiah_wake", volume: 0.8) }
-    func liveClose() { play("messiah_window_close", volume: 0.8) }
-    func interrupt() { play("messiah_interrupt", volume: 0.8) }
+    func playError() { play(.error) }
+    func micOn() { play(.mic, file: "messiah_mic_on") }
+    func micOff() { play(.mic, file: "messiah_mic_off") }
+    func liveOpen() { play(.liveOpen) }
+    func liveClose() { play(.liveClose) }
+    func interrupt() { play(.interrupt) }
 
-    private func play(_ name: String, volume: Float = 1) {
+    /// Plays any effect regardless of its switch (used by the Settings preview).
+    func preview(_ s: Sfx) { play(s, force: true) }
+
+    private func play(_ s: Sfx, file: String? = nil, force: Bool = false) {
+        guard force || s.isOn else { return }
         try? AVAudioSession.sharedInstance().setActive(true)
         cues.removeAll { !$0.isPlaying }
-        guard let p = make(name) else { return }
-        p.volume = volume
+        guard let p = make(file ?? s.file) else { return }
+        p.volume = 0.8
         p.play()
         cues.append(p)
+        if s == .thinking, force {
+            // preview only a few seconds of the loop
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { p.setVolume(0, fadeDuration: 0.3) }
+        }
     }
 }
 
@@ -82,27 +133,59 @@ final class SpeechService: NSObject, ObservableObject, AVSpeechSynthesizerDelega
         synth.speak(u)
     }
 
-    func fishAudio(_ text: String, key: String, voiceID: String) async throws -> Data {
+    /// Fish Audio text-to-speech. Returns MP3 data.
+    func fishAudio(_ text: String, key: String, voiceID: String, model: String) async throws -> Data {
         var req = URLRequest(url: URL(string: "https://api.fish.audio/v1/tts")!)
         req.httpMethod = "POST"
-        req.timeoutInterval = 60
+        req.timeoutInterval = 90
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        var body: [String: Any] = ["text": Self.clean(text), "format": "mp3"]
+        if !model.isEmpty { req.setValue(model, forHTTPHeaderField: "model") }
+        var body: [String: Any] = [
+            "text": Self.clean(text),
+            "format": "mp3",
+            "latency": "normal",
+        ]
         if !voiceID.isEmpty { body["reference_id"] = voiceID }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        guard (resp as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty else {
-            throw ProviderError(message: "Fish Audio could not synthesize this response. Check the API key and account.")
+
+        let data: Data
+        let resp: URLResponse
+        do {
+            (data, resp) = try await URLSession.shared.data(for: req)
+        } catch let e as URLError where e.code != .cancelled {
+            throw ProviderError(message: "Could not reach Fish Audio (\(e.localizedDescription)).")
+        }
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200, !data.isEmpty else {
+            throw ProviderError(message: Self.fishError(status: status, body: data))
         }
         return data
     }
 
-    func play(_ data: Data) {
+    private static func fishError(status: Int, body: Data) -> String {
+        var detail = ""
+        if let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+            detail = (obj["message"] as? String) ?? (obj["detail"] as? String) ?? ""
+        } else if let s = String(data: body.prefix(200), encoding: .utf8) {
+            detail = s
+        }
+        switch status {
+        case 401, 403: return "Fish Audio rejected the API key. Check it in Settings."
+        case 402: return "Your Fish Audio account is out of credit."
+        case 404: return "Fish Audio couldn't find that voice ID."
+        case 429: return "Fish Audio is rate limiting requests. Try again shortly."
+        default:
+            return "Fish Audio failed (HTTP \(status))" + (detail.isEmpty ? "." : ": \(detail)")
+        }
+    }
+
+    func play(_ data: Data) throws {
         try? AVAudioSession.sharedInstance().setActive(true)
-        player = try? AVAudioPlayer(data: data)
-        player?.delegate = self
-        isSpeaking = player?.play() ?? false
+        let p = try AVAudioPlayer(data: data)
+        p.delegate = self
+        player = p
+        isSpeaking = p.play()
     }
 
     func stop() {
@@ -127,5 +210,30 @@ final class SpeechService: NSObject, ObservableObject, AVSpeechSynthesizerDelega
         var t = text.replacingOccurrences(of: "\\[[a-zA-Z ]{1,20}\\]", with: "", options: .regularExpression)
         t = t.replacingOccurrences(of: "[*_#`>]+", with: "", options: .regularExpression)
         return t.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Speaks `text` with the voice chosen in Settings. Falls back to the
+/// iPhone voice (and reports why) if Fish Audio fails.
+extension SpeechService {
+    func speakWithChosenVoice(_ text: String, notice: (String) -> Void) async {
+        guard AppSettings.speechProvider == .fish else {
+            speakSystem(text)
+            return
+        }
+        guard let key = Keychain.get(AppSettings.fishKeyName) else {
+            notice("Add your Fish Audio API key in Settings. Using the iPhone voice for now.")
+            speakSystem(text)
+            return
+        }
+        do {
+            let audio = try await fishAudio(text, key: key, voiceID: AppSettings.fishVoiceID, model: AppSettings.fishModel)
+            if Task.isCancelled { return }
+            try play(audio)
+        } catch {
+            if Task.isCancelled { return }
+            notice(error.localizedDescription + " Using the iPhone voice instead.")
+            speakSystem(text)
+        }
     }
 }

@@ -6,6 +6,9 @@ final class ChatViewModel: ObservableObject {
     @Published var input = ""
     @Published private(set) var isSending = false
     @Published private(set) var status: String?
+    /// Short-lived message shown at the top (e.g. a voice error).
+    @Published private(set) var notice: String?
+    private var noticeTask: Task<Void, Never>?
 
     let store: ChatHistoryStore
     let speech: SpeechService
@@ -120,33 +123,25 @@ final class ChatViewModel: ObservableObject {
 
         guard speak else {
             SoundManager.shared.stopLoop()
-            SoundManager.shared.playSuccess()
             finish()
             return
         }
 
-        if AppSettings.speechProvider == .fish, let key = Keychain.get(AppSettings.fishKeyName) {
-            // keep the loop going until the full answer audio is ready
+        if AppSettings.speechProvider == .fish {
+            // keep the thinking loop going until the answer audio is ready
             status = "Preparing voice"
-            do {
-                let audio = try await speech.fishAudio(text, key: key, voiceID: AppSettings.fishVoiceID)
-                try Task.checkCancellation()
-                SoundManager.shared.stopLoop()
-                SoundManager.shared.playSuccess()
-                finish()
-                try? await Task.sleep(nanoseconds: 700_000_000)
-                speech.play(audio)
-            } catch {
-                SoundManager.shared.stopLoop()
-                SoundManager.shared.playError()
-                finish()
-            }
-        } else {
-            SoundManager.shared.stopLoop()
-            SoundManager.shared.playSuccess()
-            finish()
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            speech.speakSystem(text)
+        }
+        await speech.speakWithChosenVoice(text) { [weak self] msg in self?.show(notice: msg) }
+        SoundManager.shared.stopLoop()
+        finish()
+    }
+
+    func show(notice msg: String) {
+        notice = msg
+        noticeTask?.cancel()
+        noticeTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            if !Task.isCancelled { self?.notice = nil }
         }
     }
 
