@@ -1,5 +1,26 @@
 import Foundation
 import Security
+import SwiftUI
+
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+    /// nil follows the iPhone's setting.
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
 
 enum ProviderKind: String, CaseIterable, Identifiable {
     case ollama, openrouter
@@ -23,6 +44,7 @@ enum AppSettings {
     static let fishVoiceIDKey = "fishVoiceID"
     static let fishModelKey = "fishModel"
     static let personalityKey = "personality"
+    static let appearanceKey = "appearance"
 
     static let openRouterKeyName = "openrouter_api_key"
     static let fishKeyName = "fish_audio_api_key"
@@ -48,9 +70,10 @@ enum AppSettings {
 
     /// Base rules + the personality written in Settings.
     static var systemPrompt: String {
+        let base = HybridStore.shared.baseSystemPrompt ?? baseSystemPrompt
         let p = personality
-        guard !p.isEmpty else { return baseSystemPrompt }
-        return baseSystemPrompt + "\n\nPersonality (stay in this character in every reply):\n" + p
+        guard !p.isEmpty else { return base }
+        return base + "\n\nPersonality (stay in this character in every reply):\n" + p
     }
 }
 
@@ -66,7 +89,13 @@ struct PersonalityPreset: Identifiable {
     let text: String
     var id: String { name }
 
-    static let all: [PersonalityPreset] = [
+    /// Built-in presets, or the list sent by the Updater.
+    static var all: [PersonalityPreset] {
+        guard let custom = HybridStore.shared.config.personalities, !custom.isEmpty else { return builtIn }
+        return [.init(name: "Default", text: "")] + custom.map { .init(name: $0.name, text: $0.text) }
+    }
+
+    static let builtIn: [PersonalityPreset] = [
         .init(name: "Default", text: ""),
         .init(name: "Friendly", text: "Warm, upbeat and encouraging. Talks casually, like a supportive friend who is genuinely happy to help."),
         .init(name: "Witty", text: "Playful and clever, with dry humour and the occasional light tease, but always actually helpful."),

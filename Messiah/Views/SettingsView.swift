@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.fishVoiceIDKey) private var fishVoiceID = ""
     @AppStorage(AppSettings.fishModelKey) private var fishModel = FishModel.s1.rawValue
     @AppStorage(AppSettings.personalityKey) private var personality = ""
+    @AppStorage(AppSettings.appearanceKey) private var appearance = AppAppearance.system.rawValue
 
     @State private var openRouterKey = ""
     @State private var fishKey = ""
@@ -21,6 +22,13 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 providerSection
+
+                Section("Appearance") {
+                    Picker("Appearance", selection: $appearance) {
+                        ForEach(AppAppearance.allCases) { Text($0.label).tag($0.rawValue) }
+                    }
+                    .pickerStyle(.segmented)
+                }
 
                 Section {
                     NavigationLink {
@@ -45,6 +53,16 @@ struct SettingsView: View {
                         Label("Sound effects", systemImage: "speaker.wave.2")
                     }
                 }
+
+                Section {
+                    NavigationLink {
+                        UpdaterView()
+                    } label: {
+                        Label("Updater", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                } footer: {
+                    Text("Messiah \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")")
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -54,6 +72,8 @@ struct SettingsView: View {
                 }
             }
         }
+        // switch the open sheet right away too
+        .preferredColorScheme(AppAppearance(rawValue: appearance)?.colorScheme)
     }
 
     private var personalityName: String {

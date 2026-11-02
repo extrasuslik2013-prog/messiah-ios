@@ -5,6 +5,9 @@ import AVFoundation
 struct MessiahApp: App {
     @StateObject private var store: ChatHistoryStore
     @StateObject private var chat: ChatViewModel
+    @StateObject private var hybrid = HybridStore.shared
+    @AppStorage(AppSettings.appearanceKey) private var appearance = AppAppearance.system.rawValue
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let store = ChatHistoryStore()
@@ -17,7 +20,26 @@ struct MessiahApp: App {
     var body: some Scene {
         WindowGroup {
             SidebarShell(store: store) {
+                // rebuilt after an Updater pack so new colors and text show at once
                 ChatView(vm: chat, store: store)
+                    .id(hybrid.revision)
+            }
+            .preferredColorScheme(AppAppearance(rawValue: appearance)?.colorScheme)
+            .onChange(of: scenePhase) { _, phase in
+                switch phase {
+                case .active: UpdateServer.shared.start()
+                case .background: UpdateServer.shared.stop()
+                default: break
+                }
+            }
+            .onAppear { UpdateServer.shared.start() }
+            .alert("Messiah was updated", isPresented: Binding(
+                get: { hybrid.pendingAnnouncement != nil },
+                set: { if !$0 { hybrid.pendingAnnouncement = nil } })
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(hybrid.pendingAnnouncement ?? "")
             }
         }
     }

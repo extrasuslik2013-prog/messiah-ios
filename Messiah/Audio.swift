@@ -64,6 +64,9 @@ final class SoundManager {
     private var cues: [AVAudioPlayer] = []
 
     private func make(_ name: String) -> AVAudioPlayer? {
+        if let custom = HybridStore.shared.soundURL(name), let player = try? AVAudioPlayer(contentsOf: custom) {
+            return player
+        }
         guard let url = Bundle.main.url(forResource: name, withExtension: "wav")
                 ?? Bundle.main.url(forResource: name, withExtension: "mp3") else { return nil }
         return try? AVAudioPlayer(contentsOf: url)

@@ -6,8 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.1"
-    CURRENT_PROJECT_VERSION: "2"
+    MARKETING_VERSION: "2.0"
+    CURRENT_PROJECT_VERSION: "3"
 targets:
   Messiah:
     type: application
@@ -43,6 +43,8 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        NSLocalNetworkUsageDescription: Messiah connects to your Ollama server on the local network.
+        NSLocalNetworkUsageDescription: Messiah connects to your Ollama server and to Messiah Updater on your PC over the local network.
+        NSBonjourServices:
+          - _messiah-upd._tcp
         NSMicrophoneUsageDescription: Messiah listens to your voice for dictation and live chat.
         NSSpeechRecognitionUsageDescription: Messiah turns your speech into text using Apple speech recognition.

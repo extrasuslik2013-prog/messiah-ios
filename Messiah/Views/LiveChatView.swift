@@ -42,6 +42,8 @@ struct LiveChatView: View {
         .contentShape(Rectangle())
         .onTapGesture { session.interrupt() }
         .preferredColorScheme(.dark)
+        // live chat always stays dark, even when the app is set to Light
+        .environment(\.colorScheme, .dark)
         .statusBarHidden()
         .onAppear { session.start() }
         .onDisappear { session.stop() }
@@ -165,14 +167,15 @@ private struct LiveBackground: View {
 
 // MARK: - Background
 
+/// Brand colors; the Updater's pack can override any of them.
 enum Palette {
-    static let magenta = Color(red: 1.0, green: 0.18, blue: 0.77)
-    static let violet = Color(red: 0.49, green: 0.23, blue: 1.0)
-    static let blue = Color(red: 0.16, green: 0.42, blue: 1.0)
-    static let coral = Color(red: 1.0, green: 0.36, blue: 0.43)
-    static let amber = Color(red: 1.0, green: 0.77, blue: 0.25)
+    static var magenta: Color { HybridStore.shared.color("magenta") ?? Color(red: 1.0, green: 0.18, blue: 0.77) }
+    static var violet: Color { HybridStore.shared.color("violet") ?? Color(red: 0.49, green: 0.23, blue: 1.0) }
+    static var blue: Color { HybridStore.shared.color("blue") ?? Color(red: 0.16, green: 0.42, blue: 1.0) }
+    static var coral: Color { HybridStore.shared.color("coral") ?? Color(red: 1.0, green: 0.36, blue: 0.43) }
+    static var amber: Color { HybridStore.shared.color("amber") ?? Color(red: 1.0, green: 0.77, blue: 0.25) }
     static let night = Color(red: 0.05, green: 0.03, blue: 0.10)
-    static let orb: [Color] = [magenta, violet, blue, coral, amber, magenta]
+    static var orb: [Color] { [magenta, violet, blue, coral, amber, magenta] }
 }
 
 struct LiveGradientBackground: View {

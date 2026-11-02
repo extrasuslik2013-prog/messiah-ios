@@ -4,6 +4,7 @@ import SwiftUI
 /// chat; the button on the right starts a new chat (replaces "Clear").
 struct SidebarShell<Content: View>: View {
     @ObservedObject var store: ChatHistoryStore
+    @ObservedObject private var hybrid = HybridStore.shared
     let content: () -> Content
 
     init(store: ChatHistoryStore, @ViewBuilder content: @escaping () -> Content) {
@@ -67,7 +68,7 @@ struct SidebarShell<Content: View>: View {
                 .accessibilityLabel("Open chats")
 
                 Spacer()
-                Text("Messiah").font(.headline)
+                Text(HybridStore.shared.appTitle).font(.headline)
                 Spacer()
 
                 Button { store.newChat() } label: {

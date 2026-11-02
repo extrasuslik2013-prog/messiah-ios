@@ -8,9 +8,9 @@ struct GeminiBackgroundGlow: View {
     }
 
     private let blobs: [Blob] = [
-        Blob(color: Color(red: 1.0, green: 0.18, blue: 0.77), x: 0.30, y: 0.40, size: 0.75, speed: 0.22, phase: 0),
-        Blob(color: Color(red: 1.0, green: 0.36, blue: 0.43), x: 0.70, y: 0.50, size: 0.65, speed: 0.17, phase: 2),
-        Blob(color: Color(red: 1.0, green: 0.77, blue: 0.25), x: 0.50, y: 0.65, size: 0.55, speed: 0.27, phase: 4),
+        Blob(color: Palette.magenta, x: 0.30, y: 0.40, size: 0.75, speed: 0.22, phase: 0),
+        Blob(color: Palette.coral, x: 0.70, y: 0.50, size: 0.65, speed: 0.17, phase: 2),
+        Blob(color: Palette.amber, x: 0.50, y: 0.65, size: 0.55, speed: 0.27, phase: 4),
     ]
 
     var body: some View {

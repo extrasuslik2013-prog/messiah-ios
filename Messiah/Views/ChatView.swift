@@ -27,7 +27,7 @@ struct ChatView: View {
             ZStack {
                 if messages.isEmpty {
                     GeminiBackgroundGlow().opacity(0.55)
-                    Text("Ask Messiah anything.")
+                    Text(HybridStore.shared.welcomeText)
                         .font(.title2.weight(.semibold))
                         .foregroundStyle(.secondary)
                 } else {
@@ -131,7 +131,7 @@ struct ChatView: View {
 
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField(dictation.isListening ? "Listening…" : "Message Messiah", text: $vm.input, axis: .vertical)
+            TextField(dictation.isListening ? "Listening…" : HybridStore.shared.inputPlaceholder, text: $vm.input, axis: .vertical)
                 .lineLimit(1...6)
                 .focused($focused)
                 .padding(.leading, 16)
