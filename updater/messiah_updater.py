@@ -19,12 +19,14 @@ from tkinter import colorchooser, filedialog, messagebox, simpledialog, ttk
 from tkinter.scrolledtext import ScrolledText
 
 APP_NAME = "Messiah Updater"
-APP_VERSION = "1.0"
+APP_VERSION = "1.1"
 PHONE_PORT = 47800
 SERVICE = "_messiah-upd._tcp.local."
 USBMUX = ("127.0.0.1", 27015)
 DATA_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "MessiahUpdater")
 TOKENS_FILE = os.path.join(DATA_DIR, "tokens.json")
+# ownerKey (proves owner rights), ownerUDID (the only iPhone allowed to be owner), inviteSecret (backup)
+OWNER_FILE = os.path.join(DATA_DIR, "owner.json")
 
 COLORS = [
     ("magenta", "Magenta (main accent)", "#FF2EC4"),
@@ -215,6 +217,20 @@ def save_token(device_id, token):
         json.dump(tokens, f, indent=2)
 
 
+def load_owner():
+    try:
+        with open(OWNER_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_owner(data):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(OWNER_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
 def resource(name):
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, name)
@@ -327,6 +343,7 @@ class UpdaterApp(tk.Tk):
         nb.add(self._tab_sounds(nb), text="Sounds")
         nb.add(self._tab_announce(nb), text="Announcement")
         nb.add(self._tab_ipa(nb), text="Full app update (IPA)")
+        nb.add(self._tab_owner(nb), text="Owner")
 
         bar = ttk.Frame(root)
         bar.pack(fill="x")
@@ -440,6 +457,89 @@ class UpdaterApp(tk.Tk):
         self.announce_box = ScrolledText(f, height=8, wrap="word", font=("Segoe UI", 10))
         self.announce_box.pack(fill="both", expand=True, pady=(6, 0))
         return f
+
+    def _tab_owner(self, nb):
+        f = ttk.Frame(nb, padding=12)
+        msg = ("Make your own iPhone the owner of Project Messiah (Messiah 2.1+). The owner skips the invite "
+               "code and can issue 5-minute invite codes in Messiah > Settings > Admin.\n\n"
+               "This only works over a USB cable. The Updater reads the iPhone's serial number (UDID) and only "
+               "ever gives owner rights to that one iPhone. The owner key stays on this PC in:\n" + OWNER_FILE +
+               "\nBack that file up; don't share it.")
+        ttk.Label(f, text=msg, wraplength=760, justify="left").pack(anchor="w")
+        self.owner_label = ttk.Label(f, foreground="#333", justify="left")
+        self.owner_label.pack(anchor="w", pady=12)
+        row = ttk.Frame(f)
+        row.pack(anchor="w")
+        ttk.Button(row, text="Make connected iPhone the owner", command=self.make_owner).pack(side="left")
+        ttk.Button(row, text="Remove owner from connected iPhone", command=self.remove_owner).pack(side="left", padx=6)
+        self._update_owner_label()
+        return f
+
+    def _update_owner_label(self):
+        owner = load_owner()
+        lines = [
+            "Owner key on this PC: " + ("found" if owner.get("ownerKey") else "MISSING"),
+            "Owner iPhone (UDID): " + (owner.get("ownerUDID") or "not set yet (the first iPhone you make owner)"),
+        ]
+        if self.link and self.phone.get("paired"):
+            how = "USB" if self.target[0] == "usb" else "Wi-Fi"
+            lines.append(f"Connected iPhone ({how}) is owner: " + ("yes" if self.phone.get("owner") else "no"))
+        self.owner_label.configure(text="\n".join(lines))
+
+    def _usb_target_for_owner(self):
+        if not self.link or not self.phone.get("paired"):
+            messagebox.showwarning(APP_NAME, "Choose USB cable and press Connect first.")
+            return None
+        if self.target[0] != "usb":
+            messagebox.showwarning(APP_NAME, "Owner changes need a USB cable. Choose USB cable and press Connect.")
+            return None
+        return self.target[2]
+
+    def make_owner(self):
+        owner = load_owner()
+        if not owner.get("ownerKey"):
+            messagebox.showerror(APP_NAME, f"The owner key is missing from {OWNER_FILE}.")
+            return
+        serial = self._usb_target_for_owner()
+        if not serial:
+            return
+        locked = owner.get("ownerUDID")
+        if locked and locked != serial:
+            messagebox.showerror(APP_NAME, f"Owner rights are locked to the iPhone with UDID\n{locked}\n\n"
+                                           f"The connected iPhone is\n{serial}")
+            return
+        if not locked and not messagebox.askyesno(
+                APP_NAME, f"Lock owner rights to this iPhone?\n\nUDID: {serial}\n\n"
+                          "From now on only this iPhone can ever be made owner."):
+            return
+
+        def work():
+            reply = self._call({"type": "grantOwner", "ownerKey": owner["ownerKey"]})
+            self._refresh_info()
+            return reply
+
+        def done(_):
+            if not locked:
+                owner["ownerUDID"] = serial
+                save_owner(owner)
+            self.log(f"This iPhone ({serial}) is now the owner.")
+            self.set_status("Owner set")
+            self._update_owner_label()
+
+        self.run_bg("Setting owner", work, done)
+
+    def remove_owner(self):
+        if not self._usb_target_for_owner():
+            return
+        if not messagebox.askyesno(APP_NAME, "Remove owner rights from the connected iPhone?"):
+            return
+
+        def work():
+            reply = self._call({"type": "revokeOwner"})
+            self._refresh_info()
+            return reply
+
+        self.run_bg("Removing owner", work, lambda r: self.log("Owner rights removed from the connected iPhone."))
 
     def _tab_ipa(self, nb):
         f = ttk.Frame(nb, padding=12)
@@ -668,6 +768,7 @@ class UpdaterApp(tk.Tk):
                 foreground="#1a7f37")
         else:
             self.conn_label.configure(text="Not connected", foreground="#666")
+        self._update_owner_label()
 
     def _call(self, payload, binary=b"", timeout=30):
         """Runs one request, reconnecting once if the phone dropped the connection."""

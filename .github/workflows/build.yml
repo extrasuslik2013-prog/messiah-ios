@@ -11,6 +11,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Add invite secret
+        env:
+          MESSIAH_INVITE_SECRET: ${{ secrets.MESSIAH_INVITE_SECRET }}
+        run: |
+          if [ -z "$MESSIAH_INVITE_SECRET" ]; then
+            echo "::error::Repository secret MESSIAH_INVITE_SECRET is not set (run updater/set_invite_secret.py)"
+            exit 1
+          fi
+          mkdir -p Messiah/Generated
+          {
+            echo 'enum InviteSecret {'
+            echo "    static let hex = \"$MESSIAH_INVITE_SECRET\""
+            echo '}'
+          } > Messiah/Generated/InviteSecret.swift
+
       - name: Generate Xcode project
         run: |
           brew install xcodegen

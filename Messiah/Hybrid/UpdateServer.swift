@@ -193,6 +193,22 @@ final class UpdateServer: ObservableObject {
                 reply(["ok": false, "error": error.localizedDescription], nil)
             }
 
+        case "grantOwner", "revokeOwner":
+            guard OwnerStore.isUSB(c.conn) else {
+                reply(["ok": false, "error": "Owner changes only work over a USB cable."], nil)
+                return
+            }
+            if type == "revokeOwner" {
+                OwnerStore.shared.revoke()
+                lastEvent = "This iPhone is no longer the owner"
+                reply(["ok": true], nil)
+            } else if OwnerStore.shared.grant(req["ownerKey"] as? String ?? "") {
+                lastEvent = "This iPhone is now the owner"
+                reply(["ok": true], nil)
+            } else {
+                reply(["ok": false, "error": "Wrong owner key"], nil)
+            }
+
         case "reset":
             HybridStore.shared.reset()
             lastEvent = "Update pack removed; back to built-in"
@@ -259,7 +275,9 @@ final class UpdateServer: ObservableObject {
         info["deviceID"] = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
         info["packVersion"] = HybridStore.shared.config.packVersion ?? 0
         info["packName"] = HybridStore.shared.config.packName ?? ""
-        info["protocol"] = 1
+        info["protocol"] = 2
+        info["owner"] = OwnerStore.shared.isOwner
+        info["usb"] = OwnerStore.isUSB(c.conn)
         return info
     }
 

@@ -45,6 +45,9 @@ enum AppSettings {
     static let fishModelKey = "fishModel"
     static let personalityKey = "personality"
     static let appearanceKey = "appearance"
+    static let userNameKey = "userName"
+    /// Set when first-launch setup is finished; cleared by reinstalling.
+    static let onboardedKey = "onboarded_v1"
 
     static let openRouterKeyName = "openrouter_api_key"
     static let fishKeyName = "fish_audio_api_key"
@@ -70,7 +73,10 @@ enum AppSettings {
 
     /// Base rules + the personality written in Settings.
     static var systemPrompt: String {
-        let base = HybridStore.shared.baseSystemPrompt ?? baseSystemPrompt
+        var base = HybridStore.shared.baseSystemPrompt ?? baseSystemPrompt
+        if let name = d.string(forKey: userNameKey)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            base += "\nThe user's name is \(name)."
+        }
         let p = personality
         guard !p.isEmpty else { return base }
         return base + "\n\nPersonality (stay in this character in every reply):\n" + p

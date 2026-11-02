@@ -12,6 +12,8 @@ struct SettingsView: View {
     @AppStorage(AppSettings.fishModelKey) private var fishModel = FishModel.s1.rawValue
     @AppStorage(AppSettings.personalityKey) private var personality = ""
     @AppStorage(AppSettings.appearanceKey) private var appearance = AppAppearance.system.rawValue
+    @AppStorage(AppSettings.userNameKey) private var userName = ""
+    @ObservedObject private var owner = OwnerStore.shared
 
     @State private var openRouterKey = ""
     @State private var fishKey = ""
@@ -21,6 +23,26 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if owner.isOwner {
+                    Section {
+                        NavigationLink {
+                            InviteAdminView()
+                        } label: {
+                            Label("Invite codes", systemImage: "crown.fill")
+                        }
+                    } header: {
+                        Text("Admin")
+                    } footer: {
+                        Text("This iPhone is the owner of Project Messiah.")
+                    }
+                }
+
+                Section("You") {
+                    TextField("Your name", text: $userName)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                }
+
                 providerSection
 
                 Section("Appearance") {

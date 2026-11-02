@@ -7,6 +7,7 @@ struct MessiahApp: App {
     @StateObject private var chat: ChatViewModel
     @StateObject private var hybrid = HybridStore.shared
     @AppStorage(AppSettings.appearanceKey) private var appearance = AppAppearance.system.rawValue
+    @AppStorage(AppSettings.onboardedKey) private var onboarded = false
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -19,10 +20,20 @@ struct MessiahApp: App {
 
     var body: some Scene {
         WindowGroup {
-            SidebarShell(store: store) {
-                // rebuilt after an Updater pack so new colors and text show at once
-                ChatView(vm: chat, store: store)
-                    .id(hybrid.revision)
+            ZStack {
+                if onboarded {
+                    SidebarShell(store: store) {
+                        // rebuilt after an Updater pack so new colors and text show at once
+                        ChatView(vm: chat, store: store)
+                            .id(hybrid.revision)
+                    }
+                    .transition(.opacity)
+                } else {
+                    OnboardingView {
+                        withAnimation(.easeInOut(duration: 0.7)) { onboarded = true }
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 1.04)))
+                }
             }
             .preferredColorScheme(AppAppearance(rawValue: appearance)?.colorScheme)
             .onChange(of: scenePhase) { _, phase in
